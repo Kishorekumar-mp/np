@@ -1,0 +1,51 @@
+#include <stdio.h>      // For printf(), perror()
+#include <stdlib.h>     // For exit(), EXIT_FAILURE
+#include <string.h>     // For memset()
+#include <unistd.h>     // For close()
+#include <sys/types.h>  // For system data types
+#include <sys/socket.h> // For socket-related functions
+#include <netdb.h>      // For getaddrinfo(), struct addrinfo
+
+int main() {
+    struct addrinfo hints, *res;
+    int sockfd;
+
+    // Step 1: Zero out the hints structure to ensure it starts with clean values.
+    memset(&hints, 0, sizeof hints);
+    
+    // Step 2: Set up hints to define the type of socket we want.
+    hints.ai_family = AF_INET;       // Use IPv4 (AF_INET6 for IPv6)
+    hints.ai_socktype = SOCK_STREAM; // Use TCP (SOCK_DGRAM for UDP)
+    hints.ai_flags = AI_PASSIVE;     // Automatically assign the local IP address
+
+    // Step 3: Get address information for binding
+    if (getaddrinfo(NULL, "3490", &hints, &res) != 0) {
+        perror("getaddrinfo failed"); // Print error message if getaddrinfo() fails
+        exit(EXIT_FAILURE);           // Exit the program with failure code
+    }
+
+    // Step 4: Create a socket
+    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sockfd == -1) {
+        perror("socket creation failed"); // Print error message
+        freeaddrinfo(res); // Free allocated memory before exiting
+        exit(EXIT_FAILURE);
+    }
+
+    // Step 5: Bind the socket to the obtained address and port
+    if (bind(sockfd, res->ai_addr, res->ai_addrlen) == -1) {
+        perror("bind failed"); // Print error if binding fails
+        close(sockfd);         // Close the socket before exiting
+        freeaddrinfo(res);     // Free allocated memory
+        exit(EXIT_FAILURE);
+    }
+
+    // Step 6: Print success message if everything works
+    printf("Socket successfully bound to port 3490!\n");
+
+    // Step 7: Clean up allocated resources
+    freeaddrinfo(res); // Free the linked list allocated by getaddrinfo()
+    close(sockfd);     // Close the socket when done
+
+    return 0; // Exit successfully
+}
