@@ -1,0 +1,64 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+int main(int argc, char *argv[])
+{
+    struct addrinfo hints, *res, *p;  // Declare structures for address info
+    int status;  // To hold the status returned by getaddrinfo
+    char ipstr[INET6_ADDRSTRLEN];  // Buffer to store the IP address as a string (supports both IPv4 and IPv6)
+
+    // Ensure the program is run with exactly one argument (the hostname)
+    if (argc != 2) {
+        fprintf(stderr, "usage: showip hostname\n");  // Print an error message if not
+        return 1;  // Exit with an error code
+    }
+
+    // Set up the hints structure to specify what kind of addresses we're looking for
+    memset(&hints, 0, sizeof hints);  // Initialize the hints structure to zero
+    hints.ai_family = AF_UNSPEC;      // Allow both IPv4 and IPv6 addresses
+    hints.ai_socktype = SOCK_STREAM;  // We want a stream socket (TCP)
+
+    // Get address information based on the provided hostname
+    status = getaddrinfo(argv[1], NULL, &hints, &res);
+    if (status != 0) {  // If getaddrinfo fails
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));  // Print the error
+        return 2;  // Exit with an error code
+    }
+
+    // Print the hostname that we are resolving
+    printf("IP addresses for %s:\n\n", argv[1]);
+
+    // Loop through the linked list of results returned by getaddrinfo
+    for (p = res; p != NULL; p = p->ai_next) {
+        void *addr;      // Pointer to store the actual address
+        char *ipver;     // String to store the IP version (IPv4 or IPv6)
+
+        // Check the address family to determine if it's IPv4 or IPv6
+        if (p->ai_family == AF_INET) {  // If the address is IPv4
+            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;  // Cast to sockaddr_in for IPv4 addresses
+            addr = &(ipv4->sin_addr);  // Get the pointer to the IPv4 address
+            ipver = "IPv4";  // Set the IP version to "IPv4"
+        } else {  // If the address is IPv6
+            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;  // Cast to sockaddr_in6 for IPv6 addresses
+            addr = &(ipv6->sin6_addr);  // Get the pointer to the IPv6 address
+            ipver = "IPv6";  // Set the IP version to "IPv6"
+        }
+
+        // Convert the IP address to a string using inet_ntop
+        inet_ntop(p->ai_family, addr, ipstr, sizeof ipstr);
+
+        // Print the IP version and the corresponding address as a string
+        printf("  %s: %s\n", ipver, ipstr);
+    }
+
+    // Free the memory allocated for the linked list of address information
+    freeaddrinfo(res);
+
+    return 0;  // Return 0 to indicate successful execution
+}
