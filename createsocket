@@ -1,0 +1,37 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+
+int main() {
+    struct addrinfo hints, *res;
+    int sockfd;
+
+    // Zero out hints structure
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;      // IPv4
+    hints.ai_socktype = SOCK_STREAM; // TCP
+
+    // Get address information
+    if (getaddrinfo("www.example.com", "80", &hints, &res) != 0) {
+        perror("getaddrinfo failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Create socket using returned info
+    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sockfd == -1) {
+        perror("socket creation failed");
+        freeaddrinfo(res);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Socket created successfully: %d\n", sockfd);
+
+    freeaddrinfo(res); // Clean up
+    close(sockfd);     // Close socket
+    return 0;
+}
