@@ -1,0 +1,73 @@
+#include <stdio.h>      // Standard I/O functions
+#include <stdlib.h>     // For exit()
+#include <string.h>     // For memset()
+#include <unistd.h>     // For close()
+#include <sys/types.h>  // Data types used in socket programming
+#include <sys/socket.h> // For socket functions
+#include <netdb.h>      // For getaddrinfo()
+#include <arpa/inet.h>  // For inet_ntop()
+
+#define PORT "3490"   // The port to listen on
+#define BACKLOG 10     // Number of pending connections queue limit
+
+int main() {
+    struct addrinfo hints, *res;
+    int sockfd;  // Socket file descriptor
+
+    // Step 1: Set up address structure
+    memset(&hints, 0, sizeof hints);  // Clear structure
+    hints.ai_family = AF_UNSPEC;      // Allow IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;  // Use TCP (connection-oriented)
+    hints.ai_flags = AI_PASSIVE;      // Use local IP (server mode)
+
+    // Step 2: Get server address information
+    printf("Setting up server address...\n");
+    if (getaddrinfo(NULL, PORT, &hints, &res) != 0) {
+        perror("getaddrinfo");  // Print error if address setup fails
+        exit(1);
+    }
+    printf("Server address setup complete.\n");
+
+    // Step 3: Create the socket
+    printf("Creating socket...\n");
+    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sockfd == -1) {
+        perror("socket");  // Print error if socket creation fails
+        freeaddrinfo(res);
+        exit(1);
+    }
+    printf("Socket created successfully.\n");
+
+    // Step 4: Bind the socket to the port
+    printf("Binding socket to port %s...\n", PORT);
+    if (bind(sockfd, res->ai_addr, res->ai_addrlen) == -1) {
+        perror("bind");  // Print error if bind fails
+        close(sockfd);
+        freeaddrinfo(res);
+        exit(1);
+    }
+    freeaddrinfo(res);  // Address info no longer needed after binding
+    printf("Socket successfully bound to port %s.\n", PORT);
+
+    // Step 5: Listen for incoming connections
+    printf("Listening for incoming connections...\n");
+    if (listen(sockfd, BACKLOG) == -1) {
+        perror("listen");  // Print error if listen fails
+        close(sockfd);
+        exit(1);
+    }
+    printf("Server is now listening for connections on port %s...\n", PORT);
+
+    // The program is now in "listening mode" and waiting for connections
+    // The next step is `accept()` (handled in another section)
+
+    // Step 6: Keep the program running (this would normally go inside a loop)
+    printf("Press Ctrl+C to stop the server.\n");
+    while (1) {
+        sleep(1); // Keep server alive
+    }
+
+    // Step 7: Close the socket before exiting (this will never reach due to infinite loop)
+    close(sockfd);
+    return 0;
+}
