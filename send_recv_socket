@@ -1,0 +1,55 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+
+#define SERVER_IP "127.0.0.1"  // Server IP address (localhost)
+#define SERVER_PORT 3490       // Server port
+
+int main(void) {
+    int sockfd;
+    struct sockaddr_in server_addr;
+    char *msg = "Hello, Server!";
+    char buffer[1024];  // Buffer to receive data
+    int bytes_received;
+
+    // Step 1: Create socket
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        perror("socket");
+        exit(1);
+    }
+
+    // Step 2: Set up the server address structure
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(SERVER_PORT);
+    server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);  // Set to server IP address
+
+    // Step 3: Connect to the server
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("connect");
+        exit(1);
+    }
+
+    // Step 4: Send data to the server
+    send(sockfd, msg, strlen(msg), 0);
+    printf("Sent: %s\n", msg);
+
+    // Step 5: Receive a response from the server
+    bytes_received = recv(sockfd, buffer, sizeof(buffer), 0);
+    if (bytes_received == -1) {
+        perror("recv");
+        exit(1);
+    }
+    buffer[bytes_received] = '\0';  // Null-terminate the received data
+
+    printf("Server responded: %s\n", buffer);
+
+    // Step 6: Close the socket
+    close(sockfd);
+
+    return 0;
+}
