@@ -1,0 +1,21 @@
+#include <stdio.h>
+#include <unistd.h>
+
+void print_hostname() {
+    char hostname[1024];  // Buffer to store the hostname
+
+    // Get the hostname of the machine and store it in 'hostname' array
+    if (gethostname(hostname, sizeof(hostname)) == -1) {
+        perror("gethostname failed");  // Print error message if function fails
+        return;  // Exit the function if hostname retrieval fails
+    }
+
+    // Print the retrieved hostname
+    printf("My hostname is: %s\n", hostname);
+}
+
+int main() {
+    // Call the function to print the hostname
+    print_hostname();
+    return 0;
+}
