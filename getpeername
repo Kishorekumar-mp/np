@@ -1,0 +1,31 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <unistd.h>
+
+void print_peer_info(int sockfd) {
+    struct sockaddr_in peer_addr;  // Structure to store peer address
+    socklen_t addr_len = sizeof(peer_addr);  // Length of the address structure
+
+    // Get information about the peer (remote side of the connection)
+    if (getpeername(sockfd, (struct sockaddr*)&peer_addr, &addr_len) == -1) {
+        perror("getpeername failed");  // Print error message if function fails
+        exit(1);  // Exit the program with failure status
+    }
+
+    char ip_str[INET_ADDRSTRLEN];  // Buffer to store the peer's IP address in human-readable format
+
+    // Convert the peer's IP address from binary format to a human-readable string
+    if (inet_ntop(AF_INET, &peer_addr.sin_addr, ip_str, sizeof(ip_str)) == NULL) {
+        perror("inet_ntop failed");  // Print error message if conversion fails
+        exit(1);  // Exit the program with failure status
+    }
+
+    // Print the peer's IP address and port number
+    printf("Connected to peer: %s:%d\n", ip_str, ntohs(peer_addr.sin_port));
+    // ntohs() is used to convert the port number from network byte order to host byte order
+}
+
