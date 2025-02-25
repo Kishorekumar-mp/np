@@ -1,0 +1,111 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+#include <signal.h>
+
+#define PORT 3490  // Server port number
+#define BACKLOG 10 // Maximum pending connections
+
+// Function to handle child processes (Prevent zombie processes)
+void sigchld_handler(int s) {
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
+// Function to handle communication with a client
+void handle_client(int client_sock) {
+    char buffer[1024];
+    int bytes_received;
+
+    // Send a welcome message
+    char *welcome_msg = "Hello! You are connected to the server.\n";
+    send(client_sock, welcome_msg, strlen(welcome_msg), 0);
+
+    // Receive and echo messages from the client
+    while ((bytes_received = recv(client_sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
+        buffer[bytes_received] = '\0'; // Null-terminate the received data
+        printf("Client says: %s", buffer);
+
+        // Echo message back to the client
+        send(client_sock, buffer, bytes_received, 0);
+    }
+
+    printf("Client disconnected.\n");
+    close(client_sock); // Close client socket
+    exit(0);  // Exit the child process
+}
+
+int main() {
+    int server_sock, client_sock;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t addr_size;
+    char client_ip[INET_ADDRSTRLEN];
+    pid_t child_pid;
+
+    // Create the server socket
+    server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_sock == -1) {
+        perror("Socket creation failed");
+        exit(1);
+    }
+
+    // Configure the server address struct
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY; // Accept connections on any IP
+    server_addr.sin_port = htons(PORT);
+
+    // Bind the socket to the specified IP and port
+    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("Binding failed");
+        close(server_sock);
+        exit(1);
+    }
+
+    // Start listening for incoming connections
+    if (listen(server_sock, BACKLOG) == -1) {
+        perror("Listening failed");
+        close(server_sock);
+        exit(1);
+    }
+
+    printf("Server is listening on port %d...\n", PORT);
+
+    // Handle zombie processes (preventing orphaned processes)
+    signal(SIGCHLD, sigchld_handler);
+
+    // Accept multiple client connections
+    while (1) {
+        addr_size = sizeof(client_addr);
+        client_sock = accept(server_sock, (struct sockaddr *)&client_addr, &addr_size);
+        if (client_sock == -1) {
+            perror("Accept failed");
+            continue; // Continue to accept next client
+        }
+
+        // Convert client IP to readable format
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+        printf("New connection from %s\n", client_ip);
+
+        // Fork a new process to handle the client
+        child_pid = fork();
+
+        if (child_pid == 0) {  // Child process
+            close(server_sock);  // Child doesn't need the server socket
+            handle_client(client_sock);
+        } else if (child_pid > 0) {  // Parent process
+            close(client_sock);  // Parent doesn't need the client socket
+        } else {
+            perror("Fork failed");
+        }
+    }
+
+    // Close server socket (This line is never reached due to while(1))
+    close(server_sock);
+    return 0;
+}
