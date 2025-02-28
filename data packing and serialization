@@ -1,0 +1,34 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <arpa/inet.h> // htonl, ntohl for endianness
+
+uint32_t htonf(float f)
+{
+    uint32_t p;
+    memcpy(&p, &f, sizeof(f)); // Copy float bytes into uint32_t
+    return htonl(p);           // Convert to network byte order
+}
+
+float ntohf(uint32_t p)
+{
+    p = ntohl(p);              // Convert back to host byte order
+    float f;
+    memcpy(&f, &p, sizeof(f)); // Copy bits back into float
+    return f;
+}
+
+int main(void)
+{
+    float f = 3.1415926, f2;
+    uint32_t netf;
+
+    netf = htonf(f);  // Convert to network format (big-endian)
+    f2 = ntohf(netf); // Convert back to float
+
+    printf("Original: %f\n", f);
+    printf("Network : 0x%08X\n", netf); // IEEE 754-preserved
+    printf("Unpacked: %f\n", f2);       // No precision loss
+
+    return 0;
+}
