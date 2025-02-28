@@ -1,0 +1,20 @@
+#include <stdint.h>
+#include <string.h>
+#include <arpa/inet.h> // For htonl and ntohl
+
+// Serialize float to network byte order
+uint32_t serialize_float(float f)
+{
+    uint32_t p;
+    memcpy(&p, &f, sizeof(f)); // Copy float bits to uint32_t
+    return htonl(p); // Convert to network byte order (big-endian)
+}
+
+// Deserialize network byte order to float
+float deserialize_float(uint32_t p)
+{
+    p = ntohl(p); // Convert back from network byte order
+    float f;
+    memcpy(&f, &p, sizeof(f)); // Copy bits back to float
+    return f;
+}
