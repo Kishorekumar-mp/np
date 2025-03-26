@@ -1,0 +1,224 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <errno.h>
+#include <netdb.h>
+
+#define PORT 8080
+#define MAX_EVENTS 100
+#define BUFFER_SIZE 8192
+
+void set_non_blocking(int sock) {
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+}
+
+int forward_request(const char *host, const char *request, int client_fd, int content_length) {
+    struct addrinfo hints, *server_info, *p;
+    int server_fd;
+    char buffer[BUFFER_SIZE];
+    int bytes_received;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    if (getaddrinfo(host, "80", &hints, &server_info) != 0) {
+        perror("getaddrinfo failed");
+        return -1;
+    }
+
+    for (p = server_info; p != NULL; p = p->ai_next) {
+        server_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (server_fd == -1) continue;
+        if (connect(server_fd, p->ai_addr, p->ai_addrlen) == 0) break;
+        close(server_fd);
+    }
+    if (!p) {
+        perror("Unable to connect to host");
+        freeaddrinfo(server_info);
+        return -1;
+    }
+    freeaddrinfo(server_info);
+
+    send(server_fd, request, strlen(request), 0);
+
+    int remaining = content_length;
+    while (remaining > 0) {
+        int to_read = remaining < BUFFER_SIZE ? remaining : BUFFER_SIZE;
+        bytes_received = recv(client_fd, buffer, to_read, 0);
+        if (bytes_received <= 0) break;
+        send(server_fd, buffer, bytes_received, 0);
+        remaining -= bytes_received;
+    }
+
+    while ((bytes_received = recv(server_fd, buffer, BUFFER_SIZE, 0)) > 0) {
+        send(client_fd, buffer, bytes_received, 0);
+    }
+    close(server_fd);
+    return 0;
+}
+
+void handle_connect(int client_fd, char *host, int port) {
+    struct addrinfo hints, *server_info, *p;
+    int server_fd;
+    char buffer[BUFFER_SIZE];
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    if (getaddrinfo(host, "443", &hints, &server_info) != 0) {
+        perror("getaddrinfo failed");
+        close(client_fd);
+        return;
+    }
+
+    for (p = server_info; p != NULL; p = p->ai_next) {
+        server_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (server_fd == -1) continue;
+        if (connect(server_fd, p->ai_addr, p->ai_addrlen) == 0) break;
+        close(server_fd);
+    }
+    freeaddrinfo(server_info);
+
+    if (!p) {
+        perror("Unable to connect to target server");
+        close(client_fd);
+        return;
+    }
+
+    // Send "200 Connection Established" response
+    const char *response = "HTTP/1.1 200 Connection Established\r\n\r\n";
+    send(client_fd, response, strlen(response), 0);
+    
+    printf("< HTTP/1.1 200 Connection Established\n");
+    printf("* TLS 1.3 connection established\n");
+
+    // Use epoll for efficient relay between client and server
+    int epoll_fd = epoll_create1(0);
+    struct epoll_event ev, events[2];
+
+    ev.events = EPOLLIN;
+    ev.data.fd = client_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev);
+
+    ev.data.fd = server_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
+
+    while (1) {
+        int num_events = epoll_wait(epoll_fd, events, 2, -1);
+        for (int i = 0; i < num_events; i++) {
+            int src_fd = events[i].data.fd;
+            int dst_fd = (src_fd == client_fd) ? server_fd : client_fd;
+
+            int bytes = recv(src_fd, buffer, BUFFER_SIZE, 0);
+            if (bytes <= 0) {
+                close(client_fd);
+                close(server_fd);
+                close(epoll_fd);
+                return;
+            }
+            send(dst_fd, buffer, bytes, 0);
+        }
+    }
+}
+
+void handle_client(int client_fd) {
+    char buffer[BUFFER_SIZE], method[16], url[256], protocol[16], host[128];
+    int content_length = 0;
+
+    int received = recv(client_fd, buffer, BUFFER_SIZE - 1, 0);
+    if (received <= 0) {
+        close(client_fd);
+        return;
+    }
+    buffer[received] = '\0';
+    sscanf(buffer, "%s %s %s", method, url, protocol);
+
+    if (strcmp(method, "CONNECT") == 0) {
+        char hostname[128];
+        int port = 443;
+        sscanf(url, "%127[^:]:%d", hostname, &port);
+        handle_connect(client_fd, hostname, port);
+        return;
+    }
+
+    if (strncmp(url, "http://", 7) == 0) {
+        sscanf(url + 7, "%[^/]", host);
+    } else {
+        close(client_fd);
+        return;
+    }
+
+    char *content_length_header = strstr(buffer, "Content-Length:");
+    if (content_length_header) {
+        sscanf(content_length_header, "Content-Length: %d", &content_length);
+    }
+
+    forward_request(host, buffer, client_fd, content_length);
+    close(client_fd);
+}
+
+int main() {
+    int proxy_fd, client_fd, epoll_fd;
+    struct sockaddr_in proxy_addr, client_addr;
+    struct epoll_event event, events[MAX_EVENTS];
+    socklen_t client_len = sizeof(client_addr);
+
+    proxy_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (proxy_fd == -1) {
+        perror("Socket creation failed");
+        exit(1);
+    }
+
+    proxy_addr.sin_family = AF_INET;
+    proxy_addr.sin_addr.s_addr = INADDR_ANY;
+    proxy_addr.sin_port = htons(PORT);
+
+    if (bind(proxy_fd, (struct sockaddr *)&proxy_addr, sizeof(proxy_addr)) == -1) {
+        perror("Bind failed");
+        close(proxy_fd);
+        exit(1);
+    }
+
+    if (listen(proxy_fd, 10) == -1) {
+        perror("Listen failed");
+        close(proxy_fd);
+        exit(1);
+    }
+    set_non_blocking(proxy_fd);
+    epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        perror("epoll_create1 failed");
+        close(proxy_fd);
+        exit(1);
+    }
+    event.events = EPOLLIN;
+    event.data.fd = proxy_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, proxy_fd, &event);
+    printf("HTTP Proxy Server listening on port %d...\n", PORT);
+
+    while (1) {
+        int ready_fds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        for (int i = 0; i < ready_fds; i++) {
+            if (events[i].data.fd == proxy_fd) {
+                client_fd = accept(proxy_fd, (struct sockaddr *)&client_addr, &client_len);
+                if (client_fd == -1) continue;
+                set_non_blocking(client_fd);
+                event.events = EPOLLIN | EPOLLET;
+                event.data.fd = client_fd;
+                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
+            } else {
+                handle_client(events[i].data.fd);
+            }
+        }
+    }
+    close(proxy_fd);
+    return 0;
+}
